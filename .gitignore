@@ -9,3 +9,4 @@ RELEASE.md
 .env
 __example_settings.json
 .hch/ 
+.mcp.json
