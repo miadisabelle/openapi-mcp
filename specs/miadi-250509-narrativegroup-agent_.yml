@@ -120,44 +120,14 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                key:
-                  type: string
-                value:
-                  type: string
-                ttl:
-                  type: integer
-                  description: Time to live in seconds (-1 for no expiration)
-                type:
-                  type: string
-                  enum:
-                    - string
-                    - hash
-                    - list
-              required:
-                - key
-                - value
+              $ref: '#/components/schemas/MemoryRequest'
       responses:
         '200':
           description: Key stored successfully
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  key:
-                    type: string
-                  value:
-                    type: string
-                  ttl:
-                    type: integer
-                    description: Time to live in seconds (-1 for no expiration)
-                  timestamp:
-                    type: string
-                    format: date-time
-                  message:
-                    type: string
+                $ref: '#/components/schemas/MemoryStoreResponse'
         '400':
           description: Missing parameters
           content:
@@ -1196,9 +1166,6 @@ paths:
                     id: "550e8400-e29b-41d4-a716-446655440000"
                     activePersona: "miette-sprite"
                     currentMode: "desktop"
-                    resolvedCapabilities: []
-                    startTime: 1678886400
-                    lastActivity: 1678886400
       responses:
         '200':
           description: Cues detected successfully
@@ -1315,12 +1282,42 @@ components:
           format: int32
           nullable: true
     # Memory Management Schemas
+    MemoryRequest:
+      type: object
+      required:
+        - key
+        - value
+      properties:
+        key:
+          type: string
+          description: Redis key
+        value:
+          description: Value to store (any type)
+          nullable: true
+        ttl:
+          type: integer
+          description: Time to live in seconds (-1 for no expiration)
+          default: -1
+        type:
+          type: string
+          enum: ["string", "hash", "list"]
+          description: Redis data type for storage
+          default: "string"
+      example:
+        key: "user:123"
+        value: {"name": "John Doe", "email": "john@example.com"}
+        ttl: -1
+        type: "string"
     MemoryResponse:
       type: object
       properties:
         key:
           type: string
           description: Redis key
+        type:
+          type: string
+          enum: ['string', 'hash', 'list', 'set', 'zset']
+          description: Redis data type
         value:
           description: Retrieved value (any type)
           nullable: true
@@ -1330,8 +1327,34 @@ components:
           description: Timestamp of the operation
       example:
         key: "user:123"
+        type: "string"
         value: {"name": "John Doe", "email": "john@example.com"}
         timestamp: "2023-04-01T12:34:56.789Z"
+    MemoryStoreResponse:
+      type: object
+      properties:
+        key:
+          type: string
+          description: Redis key
+        value:
+          description: Stored value (any type)
+          nullable: true
+        ttl:
+          type: integer
+          description: Time to live in seconds (-1 for no expiration)
+        timestamp:
+          type: string
+          format: date-time
+          description: Timestamp of the operation
+        message:
+          type: string
+          description: Success message
+      example:
+        key: "user:123"
+        value: {"name": "John Doe", "email": "john@example.com"}
+        ttl: -1
+        timestamp: "2023-04-01T12:34:56.789Z"
+        message: "Value stored successfully"
 
     # Forge State API schemas
     ForgeStateRequest:
@@ -1411,12 +1434,24 @@ components:
     
     CollectMemoryRequest:
       type: object
+      required:
+        - keys
       properties:
         keys:
           type: array
           items:
             type: string
           description: Keys to retrieve
+          minItems: 1
+        limit:
+          type: integer
+          description: Maximum number of keys to retrieve
+          default: 100
+          minimum: 1
+          maximum: 1000
+      example:
+        keys: ["key1", "key2", "key3"]
+        limit: 10
     
     CollectMemoryResponse:
       type: object
@@ -1456,14 +1491,33 @@ components:
       properties:
         modelId:
           type: string
+          description: OpenAI model ID (uses default if not provided)
         prompt:
           type: string
+          description: Prompt text
+          minLength: 1
         maxTokens:
           type: integer
+          description: Maximum tokens to generate
+          minimum: 1
+          maximum: 4000
+          default: 1024
         temperature:
           type: number
+          description: Sampling temperature
+          minimum: 0.0
+          maximum: 2.0
+          default: 0.7
         stream:
           type: boolean
+          description: Whether to stream the response
+          default: false
+      example:
+        modelId: "gpt-4o"
+        prompt: "Write a short poem about AI"
+        maxTokens: 300
+        temperature: 0.3
+        stream: false
     
     OpenAIResponse:
       type: object
@@ -1500,12 +1554,33 @@ components:
       properties:
         modelId:
           type: string
+          description: AI model ID (uses default if not provided)
         prompt:
           type: string
+          description: Prompt text
+          minLength: 1
         maxTokens:
           type: integer
+          description: Maximum tokens to generate
+          minimum: 1
+          maximum: 4000
+          default: 1024
         temperature:
           type: number
+          description: Sampling temperature
+          minimum: 0.0
+          maximum: 2.0
+          default: 0.7
+        stream:
+          type: boolean
+          description: Whether to stream the response
+          default: false
+      example:
+        modelId: "gpt-4o"
+        prompt: "Write a short poem about AI"
+        maxTokens: 300
+        temperature: 0.3
+        stream: false
     
     AIResponse:
       type: object
@@ -1851,9 +1926,11 @@ components:
         persona:
           type: string
           description: Persona ID to activate
+          minLength: 1
         mode:
           type: string
           description: Mode ID to activate
+          minLength: 1
         contextOverrides:
           type: array
           items:
@@ -1862,6 +1939,14 @@ components:
         userId:
           type: string
           description: User identifier
+      example:
+        persona: "mia-recursive-architect"
+        mode: "desktop"
+        userId: "user123"
+        contextOverrides:
+          - name: "location"
+            type: "location"
+            value: "Central Park"
 
     SessionStartResponse:
       type: object
@@ -1918,14 +2003,23 @@ components:
           type: string
           format: uuid
           description: Session ID to modify
+          pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
         newMode:
           type: string
           description: New mode ID to activate
+          minLength: 1
         contextOverrides:
           type: array
           items:
             $ref: '#/components/schemas/ContextVariable'
           description: Context variable overrides
+      example:
+        sessionId: "550e8400-e29b-41d4-a716-446655440000"
+        newMode: "walking"
+        contextOverrides:
+          - name: "pace"
+            type: "activity"
+            value: "brisk"
 
     SessionSwitchPersonaRequest:
       type: object
@@ -1937,13 +2031,19 @@ components:
           type: string
           format: uuid
           description: Session ID to modify
+          pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
         newPersona:
           type: string
           description: New persona ID to activate
+          minLength: 1
         preserveMode:
           type: boolean
           default: true
           description: Whether to preserve current mode
+      example:
+        sessionId: "550e8400-e29b-41d4-a716-446655440000"
+        newPersona: "miette-sprite"
+        preserveMode: false
 
     CapabilityResolveRequest:
       type: object
@@ -1954,14 +2054,26 @@ components:
         persona:
           type: string
           description: Persona ID
+          minLength: 1
         mode:
           type: string
           description: Mode ID
+          minLength: 1
         context:
           type: array
           items:
             $ref: '#/components/schemas/ContextVariable'
           description: Context variables
+      example:
+        persona: "mia-recursive-architect"
+        mode: "desktop"
+        context:
+          - name: "screen"
+            type: "device"
+            value: "large"
+          - name: "focus_mode"
+            type: "custom"
+            value: "deep_work"
 
     CapabilityResolveResponse:
       type: object
@@ -1985,6 +2097,7 @@ components:
         text:
           type: string
           description: Text to analyze for cues
+          minLength: 1
         currentSession:
           $ref: '#/components/schemas/AgentSession'
           description: Current session context
@@ -1998,6 +2111,12 @@ components:
           items:
             type: string
           description: Available persona IDs
+      example:
+        text: "I'm going for a walk now"
+        currentSession:
+          id: "550e8400-e29b-41d4-a716-446655440000"
+          activePersona: "miette-sprite"
+          currentMode: "desktop"
 
     CueDetectResponse:
       type: object
