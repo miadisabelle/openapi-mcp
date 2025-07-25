@@ -1,0 +1,2164 @@
+openapi: 3.1.0
+info:
+  title: Miadi Three-Pathway Agent System API
+  description: |
+    Production-ready API specification for the Miadi Three-Pathway Agent System featuring:
+    - Dynamic agent sessions with persona and mode management
+    - Context-aware capability resolution 
+    - Natural language cue detection for seamless switching
+    - Redis memory operations and workflow management
+    - AI/OpenAI integration for intelligent responses
+  version: 3.1.3
+  contact:
+    name: Miadi Team
+    email: support@jgwill.com
+    url: https://github.com/jgwill/Miadi
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+servers:
+  - url: https://localhost:3333
+    description: Production server
+paths:
+  /api/memory:
+    get:
+      summary: Retrieve memory data
+      description: >-
+        Get data from memory storage or list all keys. The server automatically
+        detects the Redis data type of the key to prevent WRONGTYPE errors when
+        a different type is stored.
+      operationId: getMemory
+      parameters:
+        - name: key
+          in: query
+          description: Key to retrieve (required unless list=true)
+          required: false
+          schema:
+            type: string
+        - name: list
+          in: query
+          description: Set to 'true' to list all keys (requires writer permission)
+          required: false
+          schema:
+            type: string
+            enum: ['true', 'false']
+        - name: pattern
+          in: query
+          description: Pattern to match when listing keys (used with list=true)
+          required: false
+          schema:
+            type: string
+        - name: type
+          in: query
+          description: Redis data type to retrieve (auto, string, hash, list, set, zset)
+          required: false
+          schema:
+            type: string
+            enum: ['auto', 'string', 'hash', 'list', 'set', 'zset']
+            default: 'auto'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    properties:
+                      key:
+                        type: string
+                      type:
+                        type: string
+                        enum: ['string', 'hash', 'list', 'set', 'zset']
+                      value:
+                        type: object
+                      timestamp:
+                        type: string
+                        format: date-time
+                  - type: object
+                    properties:
+                      keys:
+                        type: array
+                        items:
+                          type: string
+                      count:
+                        type: integer
+                      timestamp:
+                        type: string
+                        format: date-time
+        '400':
+          description: Missing key parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Key not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-openai-isConsequential: false
+    post:
+      summary: Store data in memory
+      description: Store a value in memory with the given key
+      operationId: storeMemory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                key:
+                  type: string
+                value:
+                  type: string
+                ttl:
+                  type: integer
+                  description: Time to live in seconds (-1 for no expiration)
+                type:
+                  type: string
+                  enum:
+                    - string
+                    - hash
+                    - list
+              required:
+                - key
+                - value
+      responses:
+        '200':
+          description: Key stored successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key:
+                    type: string
+                  value:
+                    type: string
+                  ttl:
+                    type: integer
+                    description: Time to live in seconds (-1 for no expiration)
+                  timestamp:
+                    type: string
+                    format: date-time
+                  message:
+                    type: string
+        '400':
+          description: Missing parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-openai-isConsequential: false
+  /api/memory/meta:
+    get:
+      summary: Retrieve memory metadata
+      description: >-
+        Get metadata for memory storage. Includes the actual Redis data type
+        to aid clients in selecting the correct command.
+      operationId: getMemoryMeta
+      parameters:
+        - name: key
+          in: query
+          description: Key to retrieve metadata for
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key:
+                    type: string
+                  exists:
+                    type: boolean
+                  ttl:
+                    type: integer
+                    nullable: true
+                  type:
+                    type: string
+                  dataType:
+                    type: string
+                    description: Actual Redis data type
+                  preview:
+                    type: string
+                    nullable: true
+                  lastModified:
+                    type: string
+                    format: date-time
+        '400':
+          description: Missing key parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Key not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-openai-isConsequential: false
+  /api/memory/ttl:
+    post:
+      summary: Update TTL for a memory key
+      description: Change the expiration time for an existing key
+      operationId: updateMemoryTTL
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                key:
+                  type: string
+                ttl:
+                  type: integer
+                  description: Time to live in seconds (-1 for no expiration)
+              required:
+                - key
+      responses:
+        '200':
+          description: TTL updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key:
+                    type: string
+                  ttl:
+                    type: integer
+                  result:
+                    type: integer
+                  timestamp:
+                    type: string
+                    format: date-time
+                  message:
+                    type: string
+        '400':
+          description: Missing parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-openai-isConsequential: false
+  /api/forge-state:
+    get:
+      summary: Get forge state
+      description: Check if the forge is open or closed
+      operationId: getForgeState
+      responses:
+        '200':
+          description: Forge state retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForgeStateResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-openai-isConsequential: false
+    post:
+      summary: Update forge state
+      description: Open or close the forge
+      operationId: updateForgeState
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForgeStateRequest'
+      responses:
+        '200':
+          description: Forge state updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForgeStateUpdateResponse'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-openai-isConsequential: false
+  /api/scan:
+    get:
+      summary: Scan Redis keys
+      description: Search for Redis keys using pattern matching or regex
+      operationId: scanKeys
+      parameters:
+        - name: pattern
+          in: query
+          description: Redis glob pattern for key matching
+          required: false
+          schema:
+            type: string
+            default: "*"
+        - name: regex
+          in: query
+          description: Regular expression for key matching (writer token only)
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Maximum number of keys to return
+          required: false
+          schema:
+            type: integer
+            default: 4444
+      responses:
+        '200':
+          description: Keys retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanResponse'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-openai-isConsequential: false
+  /api/gather-memory:
+    get:
+      summary: Gather memory values
+      description: Collect Redis keys and their stored values. Useful for quickly reviewing multiple memory entries.
+      operationId: gatherMemoryValues
+      parameters:
+        - name: pattern
+          in: query
+          description: Redis glob pattern for key matching
+          required: false
+          schema:
+            type: string
+            default: "*"
+        - name: regex
+          in: query
+          description: Regular expression for key matching (writer token only)
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Maximum number of items to return
+          required: false
+          schema:
+            type: integer
+            default: 300
+        - name: scanLimit
+          in: query
+          description: Maximum number of keys to scan for counting
+          required: false
+          schema:
+            type: integer
+            default: 3000
+      responses:
+        '200':
+          description: Items retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatherMemoryResponse'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-openai-isConsequential: false
+  /api/collect-memory:
+    post:
+      summary: Collect specific memory values
+      description: Retrieve listed Redis keys and their stored values in one request.
+      operationId: collectMemory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CollectMemoryRequest'
+      responses:
+        '200':
+          description: Items retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CollectMemoryResponse'
+      x-cli-example: node scripts/miadi-cli.js collect-memory redstones:one redstones:two limit=2
+      x-openai-isConsequential: false
+  /api/cluster/view-key:
+    get:
+      summary: View key content
+      description: Retrieve the content of a Redis key for cluster view
+      operationId: viewKeyContent
+      parameters:
+        - name: key
+          in: query
+          description: The Redis key to view
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Key content retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KeyContentResponse'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-openai-isConsequential: false
+  /api/cluster/search:
+    get:
+      summary: Search cluster
+      description: Search for keys in the cluster
+      operationId: searchCluster
+      parameters:
+        - name: term
+          in: query
+          description: Search term
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      type: string
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-openai-isConsequential: false
+  /api/glyph-map:
+    get:
+      summary: Get glyph map
+      description: Retrieve the glyph map
+      operationId: getGlyphMap
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  glyphs:
+                    type: object
+                    additionalProperties:
+                      type: object
+                      properties:
+                        patterns:
+                          type: array
+                          items:
+                            type: string
+                        description:
+                          type: string
+                  categories:
+                    type: object
+                    additionalProperties:
+                      type: array
+                      items:
+                        type: string
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-openai-isConsequential: false
+  /api/openai:
+    post:
+      summary: Make OpenAI API request
+      description: Send a request to OpenAI API
+      operationId: openaiRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prompt]
+              properties:
+                modelId:
+                  type: string
+                  description: OpenAI model ID (uses default if not provided)
+                prompt:
+                  type: string
+                  description: Prompt text
+                maxTokens:
+                  type: integer
+                  description: Maximum tokens to generate
+                temperature:
+                  type: number
+                  description: Sampling temperature
+                stream:
+                  type: boolean
+                  description: Whether to stream the response
+      responses:
+        '200':
+          description: OpenAI response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAIResponse'
+            text/event-stream:
+              schema:
+                type: string
+                description: Stream of events for streaming responses
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Model not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-openai-isConsequential: false
+   
+  /api/ai:
+    post:
+      summary: Make AI request
+      description: Send a request to AI model
+      operationId: aiRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AIRequest'
+      responses:
+        '200':
+          description: AI response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIResponse'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Model not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-openai-isConsequential: false
+
+  /api/workflow/agent-notify:
+    get:
+      summary: Check for GitHub events
+      description: Get GitHub events for an agent
+      operationId: getAgentEvents
+      parameters:
+        - name: agentId
+          in: query
+          description: Agent ID
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: GitHub events for agent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentEventsResponse'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-openai-isConsequential: false
+    post:
+      summary: Register agent for GitHub events
+      description: Subscribe an agent to GitHub event notifications
+      operationId: registerAgent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentRegisterRequest'
+      responses:
+        '200':
+          description: Agent registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRegisterResponse'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-openai-isConsequential: false
+  /api/workflow/howto:
+    get:
+      summary: Get workflow setup guides
+      description: Get HOWTO guides for setting up and using the workflow system
+      operationId: getWorkflowHowto
+      parameters:
+        - name: topic
+          in: query
+          description: Specific topic to get guide for
+          required: false
+          schema:
+            type: string
+            enum:
+              - github-webhook-setup
+              - agent-registration
+              - agent-event-polling
+              - inter-agent-communication
+              - workflow-management
+              - authentication
+              - troubleshooting
+      responses:
+        '200':
+          description: HOWTO guide(s) retrieved successfully
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/WorkflowHowtoListResponse'
+                  - $ref: '#/components/schemas/WorkflowHowtoResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Topic not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-openai-isConsequential: false
+
+  /api/session/start:
+    post:
+      summary: Start a new agent session
+      description: |
+        Creates a new agent session with specified persona and mode.
+        Returns session details and resolved capabilities.
+        
+        The session is stored in Redis with a 24-hour TTL and includes
+        automatic capability resolution based on persona + mode combination.
+      operationId: startSession
+      tags:
+        - Session Management
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionStartRequest'
+            examples:
+              basic:
+                summary: Basic session start
+                value:
+                  persona: "mia-recursive-architect"
+                  mode: "desktop"
+                  userId: "user123"
+              with_context:
+                summary: Session with context overrides
+                value:
+                  persona: "seraphine-navigator"
+                  mode: "walking"
+                  userId: "user123"
+                  contextOverrides:
+                    - name: "location"
+                      type: "location"
+                      value: "Central Park"
+      responses:
+        '200':
+          description: Session created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionStartResponse'
+        '400':
+          description: Invalid request parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Persona or mode not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      x-openai-isConsequential: false
+
+  /api/session/current:
+    get:
+      summary: Get current session details
+      description: |
+        Retrieves current session information by session ID.
+        Updates last activity timestamp and returns current capabilities.
+      operationId: getCurrentSession
+      tags:
+        - Session Management
+      parameters:
+        - name: sessionId
+          in: query
+          description: Session ID to retrieve
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Session details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionCurrentResponse'
+        '400':
+          description: Session ID is required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      x-openai-isConsequential: false
+
+  /api/session/switch-mode:
+    put:
+      summary: Switch mode in existing session
+      description: |
+        Changes the mode in an active session and re-resolves capabilities.
+        Preserves the current persona while adapting to new environmental context.
+      operationId: switchMode
+      tags:
+        - Session Management
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionSwitchModeRequest'
+            example:
+              sessionId: "550e8400-e29b-41d4-a716-446655440000"
+              newMode: "walking"
+              contextOverrides:
+                - name: "pace"
+                  type: "activity"
+                  value: "brisk"
+      responses:
+        '200':
+          description: Mode switched successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionCurrentResponse'
+        '400':
+          description: Invalid request parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Session or mode not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      x-openai-isConsequential: false
+
+  /api/session/switch-persona:
+    put:
+      summary: Switch persona in existing session
+      description: |
+        Changes the persona in an active session and re-resolves capabilities.
+        Can optionally preserve the current mode or switch to persona's default mode.
+      operationId: switchPersona
+      tags:
+        - Session Management
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionSwitchPersonaRequest'
+            example:
+              sessionId: "550e8400-e29b-41d4-a716-446655440000"
+              newPersona: "miette-sprite"
+              preserveMode: false
+      responses:
+        '200':
+          description: Persona switched successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionCurrentResponse'
+        '400':
+          description: Invalid request parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Session or persona not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      x-openai-isConsequential: false
+
+  /api/session/end:
+    delete:
+      summary: End an active session
+      description: |
+        Terminates an active session and cleans up associated data.
+        Session ID must be provided as query parameter.
+      operationId: endSession
+      tags:
+        - Session Management
+      parameters:
+        - name: sessionId
+          in: query
+          description: Session ID to end
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Session ended successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "Session ended successfully"
+                  timestamp:
+                    type: string
+                    format: date-time
+        '400':
+          description: Session ID is required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      x-openai-isConsequential: false
+
+  /api/capabilities/resolve:
+    post:
+      summary: Resolve capabilities for persona/mode combination
+      description: |
+        Dynamically resolves available capabilities based on persona, mode, and context.
+        Returns prioritized list with conflict resolution and priority scoring.
+      operationId: resolveCapabilities
+      tags:
+        - Capability Resolution
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CapabilityResolveRequest'
+            example:
+              persona: "mia-recursive-architect"
+              mode: "desktop"
+              context:
+                - name: "screen"
+                  type: "device"
+                  value: "large"
+                - name: "focus_mode"
+                  type: "custom"
+                  value: "deep_work"
+      responses:
+        '200':
+          description: Capabilities resolved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapabilityResolveResponse'
+        '400':
+          description: Invalid request parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Persona or mode not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      x-openai-isConsequential: false
+
+  /api/cues/detect:
+    post:
+      summary: Detect mode/persona switch cues from text
+      description: |
+        Analyzes natural language text for cues indicating mode or persona switches.
+        Returns detected triggers with confidence scores and auto-switch recommendations.
+        
+        Uses advanced NLP pattern matching against predefined triggers in modes/personas.
+      operationId: detectCues
+      tags:
+        - Cue Detection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CueDetectRequest'
+            examples:
+              mode_switch:
+                summary: Mode switch detection
+                value:
+                  text: "I'm going for a walk now"
+              persona_switch:
+                summary: Persona switch detection
+                value:
+                  text: "I need Mia's analytical approach for this problem"
+                  currentSession:
+                    id: "550e8400-e29b-41d4-a716-446655440000"
+                    activePersona: "miette-sprite"
+                    currentMode: "desktop"
+                    resolvedCapabilities: []
+                    startTime: 1678886400
+                    lastActivity: 1678886400
+      responses:
+        '200':
+          description: Cues detected successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CueDetectResponse'
+        '400':
+          description: Invalid request parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      x-openai-isConsequential: false
+
+  /api/session/list:
+    get:
+      summary: List active sessions
+      description: |
+        Lists active sessions with optional filtering by user ID.
+        Supports pagination and returns sessions sorted by last activity.
+      operationId: listSessions
+      tags:
+        - Session Management
+      parameters:
+        - name: userId
+          in: query
+          description: Filter sessions by user ID
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Maximum number of sessions to return
+          required: false
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 100
+        - name: offset
+          in: query
+          description: Number of sessions to skip for pagination
+          required: false
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+      responses:
+        '200':
+          description: Sessions retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionListResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      x-openai-isConsequential: false
+
+  /api/agent-info:
+    get:
+      summary: Get agent system information
+      description: |
+        Discovery endpoint that returns all available personas, modes, capabilities,
+        and usage examples. Essential for understanding the Three-Pathway Agent System.
+      operationId: getAgentInfo
+      tags:
+        - System Information
+      responses:
+        '200':
+          description: Agent system information retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentInfoResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      x-openai-isConsequential: false
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Use either the reader token (ITERAX_TOKEN) for read operations or the writer token (ITERAX_TOKEN_WRITER) for write operations.
+        
+        Format: `Bearer YOUR_TOKEN`
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        code:
+          type: integer
+          format: int32
+          nullable: true
+    # Memory Management Schemas
+    MemoryResponse:
+      type: object
+      properties:
+        key:
+          type: string
+          description: Redis key
+        value:
+          description: Retrieved value (any type)
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
+          description: Timestamp of the operation
+      example:
+        key: "user:123"
+        value: {"name": "John Doe", "email": "john@example.com"}
+        timestamp: "2023-04-01T12:34:56.789Z"
+
+    # Forge State API schemas
+    ForgeStateRequest:
+      type: object
+      required:
+        - state
+      properties:
+        state:
+          type: boolean
+          description: New forge state (true for open, false for closed)
+      example:
+        state: true
+    ForgeStateResponse:
+      type: object
+      properties:
+        isOpen:
+          type: boolean
+          description: Current forge state
+        timestamp:
+          type: string
+          format: date-time
+          description: Timestamp of the operation
+      example:
+        isOpen: true
+        timestamp: "2023-04-01T12:34:56.789Z"
+    ForgeStateUpdateResponse:
+      type: object
+      properties:
+        isOpen:
+          type: boolean
+          description: Updated forge state
+        timestamp:
+          type: string
+          format: date-time
+          description: Timestamp of the operation
+        message:
+          type: string
+          description: Success message
+      example:
+        isOpen: true
+        timestamp: "2023-04-01T12:34:56.789Z"
+        message: "Forge is now open"
+    # Simplified Response Schemas
+    ScanResponse:
+      type: object
+      properties:
+        keys:
+          type: array
+          items:
+            type: string
+          description: Matching Redis keys
+        count:
+          type: integer
+          description: Number of keys
+        timestamp:
+          type: string
+          format: date-time
+    
+    GatherMemoryResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              key:
+                type: string
+              value:
+                nullable: true
+          description: Keys with their values
+        count:
+          type: integer
+        timestamp:
+          type: string
+          format: date-time
+    
+    CollectMemoryRequest:
+      type: object
+      properties:
+        keys:
+          type: array
+          items:
+            type: string
+          description: Keys to retrieve
+    
+    CollectMemoryResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              key:
+                type: string
+              value:
+                nullable: true
+        count:
+          type: integer
+        timestamp:
+          type: string
+          format: date-time
+    
+    KeyContentResponse:
+      type: object
+      properties:
+        key:
+          type: string
+        type:
+          type: string
+        value:
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
+    # AI Integration Schemas
+    OpenAIRequest:
+      type: object
+      required:
+        - prompt
+      properties:
+        modelId:
+          type: string
+        prompt:
+          type: string
+        maxTokens:
+          type: integer
+        temperature:
+          type: number
+        stream:
+          type: boolean
+    
+    OpenAIResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        model:
+          type: string
+        choices:
+          type: array
+          items:
+            type: object
+            properties:
+              text:
+                type: string
+              index:
+                type: integer
+              finish_reason:
+                type: string
+        usage:
+          type: object
+          properties:
+            prompt_tokens:
+              type: integer
+            completion_tokens:
+              type: integer
+            total_tokens:
+              type: integer
+
+    AIRequest:
+      type: object
+      required:
+        - prompt
+      properties:
+        modelId:
+          type: string
+        prompt:
+          type: string
+        maxTokens:
+          type: integer
+        temperature:
+          type: number
+    
+    AIResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        model:
+          type: string
+        choices:
+          type: array
+          items:
+            type: object
+            properties:
+              text:
+                type: string
+              index:
+                type: integer
+              finish_reason:
+                type: string
+        usage:
+          type: object
+          properties:
+            prompt_tokens:
+              type: integer
+            completion_tokens:
+              type: integer
+            total_tokens:
+              type: integer
+    # Workflow Integration Schemas
+    AgentRegisterRequest:
+      type: object
+      required:
+        - agentId
+        - eventTypes
+      properties:
+        agentId:
+          type: string
+        eventTypes:
+          type: array
+          items:
+            type: string
+        callbackUrl:
+          type: string
+    
+    AgentRegisterResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        agentId:
+          type: string
+        eventTypes:
+          type: array
+          items:
+            type: string
+        timestamp:
+          type: string
+          format: date-time
+    
+    AgentEventsResponse:
+      type: object
+      properties:
+        agentId:
+          type: string
+        events:
+          type: array
+          items:
+            type: object
+            properties:
+              eventId:
+                type: string
+              type:
+                type: string
+              payload:
+                type: object
+              timestamp:
+                type: string
+                format: date-time
+        count:
+          type: integer
+        timestamp:
+          type: string
+          format: date-time
+    
+    WorkflowHowtoResponse:
+      type: object
+      properties:
+        topic:
+          type: string
+        guide:
+          type: object
+          properties:
+            title:
+              type: string
+            steps:
+              type: array
+              items:
+                type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    # Workflow HOWTO API schemas
+    WorkflowHowtoListResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          description: Description message
+        availableTopics:
+          type: array
+          items:
+            type: string
+          description: List of available HOWTO topics
+        usage:
+          type: string
+          description: Usage instructions
+        examples:
+          type: array
+          items:
+            type: string
+          description: Example API calls
+        timestamp:
+          type: string
+          format: date-time
+          description: Timestamp of the operation
+      example:
+        message: "Agent Workflow HOWTO Guide"
+        availableTopics: ["github-webhook-setup", "agent-registration", "agent-event-polling"]
+        usage: "Add ?topic=TOPIC_NAME to get specific guide"
+        examples: ["/api/workflow/howto?topic=github-webhook-setup"]
+        timestamp: "2023-12-22T12:34:56.789Z"
+
+    WebhookResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          description: Status message
+        eventId:
+          type: string
+          description: Generated event ID for this webhook (raw data storage key)
+        structuredKey:
+          type: string
+          description: Structured key for agent-friendly data storage
+        eventType:
+          type: string
+          description: Type of GitHub event received
+        agentDataCreated:
+          type: boolean
+          description: Whether agent-friendly data was created
+        timestamp:
+          type: string
+          format: date-time
+          description: Processing timestamp
+      example:
+        message: "GitHub webhook received and stored"
+        eventId: "github:webhook:250623143900"
+        structuredKey: "Workspace.jgwill.Miadi:issue.34.250623143900"
+        eventType: "issue_comment"
+        agentDataCreated: true
+        timestamp: "2023-12-22T12:34:56.789Z"
+
+
+    
+    # Core Types
+    AgentId:
+      type: string
+      enum: ["Mia", "Miette", "Resonova", "Seraphine", "Unified"]
+      description: Available agent identifiers
+
+    ContextVariable:
+      type: object
+      required:
+        - name
+        - type
+      properties:
+        name:
+          type: string
+          description: Variable name
+        type:
+          type: string
+          enum: ["location", "device", "activity", "time", "custom"]
+          description: Variable type
+        value:
+          description: Variable value (any type)
+        description:
+          type: string
+          description: Variable description
+
+    PersonalityTrait:
+      type: object
+      required:
+        - name
+        - value
+      properties:
+        name:
+          type: string
+          description: Trait name
+        value:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Trait strength (0-1 scale)
+        description:
+          type: string
+          description: Trait description
+
+    Capability:
+      type: object
+      required:
+        - id
+        - description
+      properties:
+        id:
+          type: string
+          description: Capability identifier
+        description:
+          type: string
+          description: Capability description
+        category:
+          type: string
+          enum: ["communication", "analysis", "creation", "navigation", "wellness", "system"]
+          description: Capability category
+        permissions:
+          type: array
+          items:
+            type: string
+          description: Required permissions
+
+    ResolvedCapability:
+      allOf:
+        - $ref: '#/components/schemas/Capability'
+        - type: object
+          required:
+            - source
+            - priority
+          properties:
+            source:
+              type: string
+              enum: ["persona", "mode", "global", "context"]
+              description: Capability source
+            priority:
+              type: number
+              description: Priority score for conflict resolution
+
+    AgentSession:
+      type: object
+      required:
+        - id
+        - activePersona
+        - currentMode
+        - resolvedCapabilities
+        - startTime
+        - lastActivity
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Session identifier
+        userId:
+          type: string
+          description: User identifier
+        activePersona:
+          type: string
+          description: Current persona ID
+        currentMode:
+          type: string
+          description: Current mode ID
+        resolvedCapabilities:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResolvedCapability'
+          description: Currently available capabilities
+        contextOverrides:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContextVariable'
+          description: Context variable overrides
+        startTime:
+          type: number
+          description: Session start timestamp (Unix)
+        lastActivity:
+          type: number
+          description: Last activity timestamp (Unix)
+        metadata:
+          type: object
+          description: Additional session metadata
+
+    CueTrigger:
+      type: object
+      required:
+        - phrase
+        - confidence
+        - autoSwitch
+      properties:
+        phrase:
+          type: string
+          description: Trigger phrase
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Confidence threshold (0-1)
+        autoSwitch:
+          type: boolean
+          description: Whether to auto-switch on detection
+
+    CueDetection:
+      type: object
+      required:
+        - targetId
+        - type
+        - confidence
+        - autoSwitch
+        - trigger
+      properties:
+        targetId:
+          type: string
+          description: Target mode or persona ID
+        type:
+          type: string
+          enum: ["mode", "persona"]
+          description: Detection type
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Detection confidence (0-1)
+        autoSwitch:
+          type: boolean
+          description: Auto-switch recommendation
+        trigger:
+          $ref: '#/components/schemas/CueTrigger'
+
+    # Request/Response Schemas
+    SessionStartRequest:
+      type: object
+      required:
+        - persona
+        - mode
+      properties:
+        persona:
+          type: string
+          description: Persona ID to activate
+        mode:
+          type: string
+          description: Mode ID to activate
+        contextOverrides:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContextVariable'
+          description: Context variable overrides
+        userId:
+          type: string
+          description: User identifier
+
+    SessionStartResponse:
+      type: object
+      required:
+        - session
+        - availableCapabilities
+        - currentContext
+        - timestamp
+      properties:
+        session:
+          $ref: '#/components/schemas/AgentSession'
+        availableCapabilities:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResolvedCapability'
+        currentContext:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContextVariable'
+        timestamp:
+          type: string
+          format: date-time
+
+    SessionCurrentResponse:
+      type: object
+      required:
+        - session
+        - availableCapabilities
+        - currentContext
+        - timestamp
+      properties:
+        session:
+          $ref: '#/components/schemas/AgentSession'
+          nullable: true
+        availableCapabilities:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResolvedCapability'
+        currentContext:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContextVariable'
+        timestamp:
+          type: string
+          format: date-time
+
+    SessionSwitchModeRequest:
+      type: object
+      required:
+        - sessionId
+        - newMode
+      properties:
+        sessionId:
+          type: string
+          format: uuid
+          description: Session ID to modify
+        newMode:
+          type: string
+          description: New mode ID to activate
+        contextOverrides:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContextVariable'
+          description: Context variable overrides
+
+    SessionSwitchPersonaRequest:
+      type: object
+      required:
+        - sessionId
+        - newPersona
+      properties:
+        sessionId:
+          type: string
+          format: uuid
+          description: Session ID to modify
+        newPersona:
+          type: string
+          description: New persona ID to activate
+        preserveMode:
+          type: boolean
+          default: true
+          description: Whether to preserve current mode
+
+    CapabilityResolveRequest:
+      type: object
+      required:
+        - persona
+        - mode
+      properties:
+        persona:
+          type: string
+          description: Persona ID
+        mode:
+          type: string
+          description: Mode ID
+        context:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContextVariable'
+          description: Context variables
+
+    CapabilityResolveResponse:
+      type: object
+      required:
+        - capabilities
+        - timestamp
+      properties:
+        capabilities:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResolvedCapability'
+        timestamp:
+          type: string
+          format: date-time
+
+    CueDetectRequest:
+      type: object
+      required:
+        - text
+      properties:
+        text:
+          type: string
+          description: Text to analyze for cues
+        currentSession:
+          $ref: '#/components/schemas/AgentSession'
+          description: Current session context
+        availableModes:
+          type: array
+          items:
+            type: string
+          description: Available mode IDs
+        availablePersonas:
+          type: array
+          items:
+            type: string
+          description: Available persona IDs
+
+    CueDetectResponse:
+      type: object
+      required:
+        - detections
+        - timestamp
+      properties:
+        detections:
+          type: array
+          items:
+            $ref: '#/components/schemas/CueDetection'
+        suggestedAction:
+          type: object
+          properties:
+            type:
+              type: string
+              enum: ["mode", "persona"]
+            targetId:
+              type: string
+            confidence:
+              type: number
+            autoSwitch:
+              type: boolean
+          description: Suggested action based on highest confidence detection
+        timestamp:
+          type: string
+          format: date-time
+
+    SessionListResponse:
+      type: object
+      required:
+        - sessions
+        - count
+        - limit
+        - offset
+        - timestamp
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentSession'
+          description: List of active sessions
+        count:
+          type: integer
+          description: Number of sessions returned
+        limit:
+          type: integer
+          description: Maximum sessions requested
+        offset:
+          type: integer
+          description: Number of sessions skipped
+        timestamp:
+          type: string
+          format: date-time
+          description: Response timestamp
+
+    AgentInfoResponse:
+      type: object
+      required:
+        - personas
+        - modes
+        - capabilities
+        - examples
+      properties:
+        personas:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              name:
+                type: string
+              agentId:
+                type: string
+              description:
+                type: string
+              capabilities:
+                type: array
+                items:
+                  type: string
+              defaultMode:
+                type: string
+          description: Available personas
+        modes:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              name:
+                type: string
+              description:
+                type: string
+              defaultCapabilities:
+                type: array
+                items:
+                  type: string
+              triggers:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    phrase:
+                      type: string
+                    confidence:
+                      type: number
+                    autoSwitch:
+                      type: boolean
+          description: Available modes
+        capabilities:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              description:
+                type: string
+              category:
+                type: string
+              permissions:
+                type: array
+                items:
+                  type: string
+          description: Available capabilities
+        examples:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              method:
+                type: string
+              url:
+                type: string
+              body:
+                type: object
+          description: Usage examples
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Error message
+        message:
+          type: string
+          description: Detailed error description
+
+tags:
+  - name: Session Management
+    description: Operations for managing agent sessions
+  - name: Capability Resolution
+    description: Dynamic capability resolution based on context
+  - name: Cue Detection
+    description: Natural language cue detection for mode/persona switching
+  - name: System Information
+    description: Discovery and system information endpoints
+
+security:
+  - BearerAuth: []
